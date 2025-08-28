@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eco-Sintetizador</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="loader">CARGANDO NÚCLEO SEMÁNTICO...</div>
+
+    <div id="game-container" class="hidden">
+        <div id="hud">
+            <span>ESTABILIDAD DE LA REALIDAD:</span>
+            <span id="stability-percent">100%</span>
+        </div>
+
+        <div id="source-echo-container">
+            <p>> ECO FUENTE:</p>
+            <h2 id="source-echo-text"></h2>
+        </div>
+
+        <div id="target-echoes-container">
+            <p>> SEÑALES OBJETIVO (SELECCIONA UNA):</p>
+            <ul id="target-echoes-list">
+                </ul>
+        </div>
+        
+        <div id="result-log">
+            <p>> SALIDA DEL SINTETIZADOR:</p>
+            <span id="result-text">En espera...</span>
+        </div>
+    </div>
+    
+    <div id="corruption-overlay"></div>
+
+    <script src="script.js" type="module"></script>
+</body>
+</html>
