@@ -1,7 +1,4 @@
-// Importamos las herramientas de bajo nivel y la función de similitud
-import { AutoTokenizer, AutoModel, cos_sim, Tensor } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-
-// --- BANCO DE PUZLES Y DEMÁS... (esto no cambia) ---
+// --- BANCO DE PUZLES ---
 const PUZZLE_BANK = [
     { source: 'El sujeto abandonó el arma en el puente al anochecer.', answer: 'El fugitivo se deshizo de la pistola cuando el sol se ponía sobre el viaducto.' },
     { source: 'La transmisión contenía datos encriptados sobre la ubicación del artefacto.', answer: 'El mensaje cifrado revelaba dónde estaba el objeto.' },
@@ -11,13 +8,7 @@ const PUZZLE_BANK = [
 ];
 const DISTRACTOR_POOL = [ 'Los gatos comen pescado.', 'El cielo es generalmente azul.', 'La semana tiene siete días.', 'El sol es una estrella.' ];
 
-const UI = { /* ... SIN CAMBIOS ... */ };
-const AI = { /* ... RECONSTRUIDO ... */ };
-const Game = { /* ... SIN CAMBIOS ... */ };
-
-
-// Rellenamos UI para que el código sea completo (copia y pega de la vez anterior)
-Object.assign(UI, {
+const UI = {
     init() {
         this.loader = document.getElementById('loader');
         this.gameContainer = document.getElementById('game-container');
@@ -47,66 +38,57 @@ Object.assign(UI, {
         if (stability <= 0) this.body.classList.add('stability-0');
     },
     showResult(text) { this.resultText.textContent = text; }
-});
+};
 
-
-// =================================================================
-// ============ MÓDULO DE IA RECONSTRUIDO PIEZA A PIEZA ============
-// =================================================================
-Object.assign(AI, {
+// --- MÓDULO DE IA (RECONSTRUIDO CON TENSORFLOW.JS) ---
+const AI = {
+    model: null,
     async init() {
-        // Construimos la URL absoluta y perfecta NOSOTROS.
-        const modelPath = new URL('./models/all-MiniLM-L6-v2', window.location.href).href;
-        
-        // Le pedimos las piezas por separado, dándole la URL completa.
-        // Ahora no tiene excusa para buscar en otro sitio.
-        this.tokenizer = await AutoTokenizer.from_pretrained(modelPath);
-        this.model = await AutoModel.from_pretrained(modelPath);
+        // 'use' es el objeto que nos da el script de Universal Sentence Encoder
+        this.model = await use.load();
     },
-
-    // Esta función es más compleja porque hacemos a mano lo que 'pipeline' hacía mal.
     async getSimilarity(text1, text2) {
-        if (!this.tokenizer || !this.model) return 0;
-
-        // 1. Tokenizar (convertir frases en números que la IA entiende)
-        const inputs = this.tokenizer([text1, text2], { padding: true, truncation: true });
-
-        // 2. Pasar los números por el modelo para obtener los "embeddings" (la esencia de la frase)
-        const output = await this.model(inputs);
-
-        // 3. Pooling y Normalización (matemáticas para limpiar la salida del modelo)
-        const { token_embeddings, attention_mask } = output;
-        const input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.dims);
-        const sum_embeddings = token_embeddings.mul(input_mask_expanded).sum(1);
-        const sum_mask = input_mask_expanded.sum(1);
-        const pooled = sum_embeddings.div(sum_mask);
-        const normalized = pooled.normalize(2, 0);
-
-        // 4. Comparar los dos resultados finales
-        const [e1, e2] = normalized.data;
-        const similarity = (cos_sim(e1, e2) + 1) / 2 * 100;
+        if (!this.model) return 0;
         
-        return Math.round(similarity);
+        // Obtenemos los 'embeddings' (la esencia de la frase en números)
+        const embeddings = await this.model.embed([text1, text2]);
+        const embeddingsArray = await embeddings.array();
+        
+        const vec1 = embeddingsArray[0];
+        const vec2 = embeddingsArray[1];
+
+        // Calculamos la similitud del coseno a mano (es más fiable)
+        let dotProduct = 0;
+        let mag1 = 0;
+        let mag2 = 0;
+        for (let i = 0; i < vec1.length; i++) {
+            dotProduct += vec1[i] * vec2[i];
+            mag1 += vec1[i] * vec1[i];
+            mag2 += vec2[i] * vec2[i];
+        }
+        mag1 = Math.sqrt(mag1);
+        mag2 = Math.sqrt(mag2);
+
+        if (mag1 === 0 || mag2 === 0) return 0;
+        
+        const similarity = dotProduct / (mag1 * mag2);
+        return Math.round(similarity * 100);
     }
-});
-// =================================================================
-// =================================================================
+};
 
-
-// Rellenamos Game para que el código sea completo (copia y pega de la vez anterior)
-Object.assign(Game, {
+const Game = {
     state: { stability: 100, usedPuzzleIndices: new Set() },
     async init() {
         UI.init();
         try {
             await AI.init();
             UI.showGame();
-            UI.showResult('Iniciando interfaz del Eco-Sintetizador. Eres un Tejedor de Ecos. Tu misión: restaurar la realidad.');
-            await new Promise(r => setTimeout(r, 3000));
+            UI.showResult('Iniciando interfaz del Eco-Sintetizador...');
+            await new Promise(r => setTimeout(r, 2000));
             this.nextPuzzle();
         } catch (error) {
             console.error("FALLO CRÍTICO AL INICIAR LA IA:", error);
-            UI.loader.textContent = "ERROR: EL NÚCLEO SEMÁNTICO NO RESPONDE. RECARGA LA SIMULACIÓN.";
+            UI.loader.textContent = "ERROR: EL NÚCLEO SEMÁNTICO NO RESPONDE.";
         }
     },
     generatePuzzle() {
@@ -117,16 +99,15 @@ Object.assign(Game, {
         const puzzleData = PUZZLE_BANK[puzzleIndex];
         const distractors = [...DISTRACTOR_POOL].sort(() => 0.5 - Math.random()).slice(0, 2);
         const targets = [puzzleData.answer, ...distractors].sort(() => 0.5 - Math.random());
-        return { source: puzzleData.source, targets: targets, answer: puzzleData.answer };
+        return { source: puzzleData.source, targets: targets };
     },
     nextPuzzle() {
         this.currentPuzzle = this.generatePuzzle();
         if (this.currentPuzzle) {
             UI.renderPuzzle(this.currentPuzzle);
-            UI.showResult('Analiza el Eco Fuente. Encuentra la resonancia semántica en las señales objetivo.');
+            UI.showResult('Analiza el Eco Fuente. Encuentra la resonancia semántica.');
         } else {
-            UI.showResult('HAS ESTABILIZADO TODOS LOS ECOS DISPONIBLES. LA REALIDAD TE DA LAS GRACIAS... POR AHORA.');
-            UI.targetEchoesList.innerHTML = '';
+            UI.showResult('HAS ESTABILIZADO TODOS LOS ECOS. LA REALIDAD TE DA LAS GRACIAS.');
         }
     },
     async selectTarget(selectedTarget) {
@@ -138,18 +119,16 @@ Object.assign(Game, {
             const damage = 25;
             this.state.stability -= damage;
             if (this.state.stability < 0) this.state.stability = 0;
-            UI.showResult(`RESONANCIA: ${similarity}%. ¡FALLO DE SINCRONIZACIÓN! Estabilidad comprometida: -${damage}%`);
+            UI.showResult(`RESONANCIA: ${similarity}%. ¡FALLO DE SINCRONIZACIÓN! Estabilidad: -${damage}%`);
             UI.updateStability(this.state.stability);
         }
         await new Promise(r => setTimeout(r, 2500));
         if (this.state.stability <= 0) {
             UI.showResult('COLAPSO TOTAL DE LA REALIDAD. SIMULACIÓN TERMINADA.');
-            UI.targetEchoesList.innerHTML = '';
-            UI.sourceEchoText.textContent = '...SEÑAL PERDIDA...';
             return;
         }
         this.nextPuzzle();
     }
-});
+};
 
 Game.init();
