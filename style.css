@@ -1,61 +1,156 @@
-:root {
-    --main-bg: #000;
-    --text-color: #0dff0d;
-    --font-stack: 'VT323', monospace;
-    --border-color: rgba(13, 255, 13, 0.3);
-    --glass-bg: rgba(0, 50, 0, 0.3); /* Fondo del cristal */
-    --accent-color: #ff0055;
-}
-* { box-sizing: border-box; }
-body { background-color: var(--main-bg); color: var(--text-color); font-family: var(--font-stack); margin: 0; font-size: 24px; text-shadow: 0 0 5px rgba(13, 255, 13, 0.5); }
-.hidden { display: none !important; }
+import { pipeline, cos_sim } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-#loader { display: flex; align-items: center; justify-content: center; height: 100vh; animation: blink 1.5s infinite; letter-spacing: 2px; }
-#game-container { padding: 2rem; height: 100vh; display: flex; flex-direction: column; gap: 1.5rem; }
+// --- BANCO DE PUZLES (Ahora mucho más grande) ---
+const PUZZLE_BANK = [
+    { source: 'El sujeto abandonó el arma en el puente al anochecer.', answer: 'El fugitivo se deshizo de la pistola cuando el sol se ponía sobre el viaducto.' },
+    { source: 'La transmisión contenía datos encriptados sobre la ubicación del artefacto.', answer: 'El mensaje cifrado revelaba dónde estaba el objeto.' },
+    { source: 'La simulación comenzó a mostrar fallos estructurales.', answer: 'El programa empezó a tener errores graves.' },
+    { source: 'Su lealtad a la corporación era inquebrantable.', answer: 'Era totalmente fiel a la empresa.' },
+    { source: 'El sistema de soporte vital de la nave falló de forma catastrófica.', answer: 'El oxígeno de la nave se agotó de repente.' },
+    { source: 'Los recuerdos del androide habían sido borrados.', answer: 'La memoria del sintético fue eliminada.' },
+    { source: 'La criatura emergió de las profundidades abisales.', answer: 'El monstruo salió del fondo del océano.' }
+];
 
-/* --- Efecto Cristal Matrix --- */
-.glass-panel {
-    background: var(--glass-bg);
-    border: 1px solid var(--border-color);
-    backdrop-filter: blur(5px);
-    -webkit-backdrop-filter: blur(5px);
-    padding: 1rem;
-}
+const DISTRACTOR_POOL = [
+    'Los gatos comen pescado.', 'El cielo es generalmente azul.', 'La gravedad tira de las cosas hacia abajo.', 'El agua está compuesta de H2O.',
+    'La semana tiene siete días.', 'El sol es una estrella.', 'Los árboles necesitan luz para crecer.', 'Los ordenadores funcionan con electricidad.'
+];
 
-#hud { display: flex; justify-content: space-between; padding-bottom: 0; }
-#hud > div { flex-basis: 48%; }
-#source-echo-container h2 { margin: 0; font-size: 1.5em; }
-#target-echoes-list { list-style: none; padding: 0; margin: 0; }
-#target-echoes-list li { padding: 0.5rem 1rem; margin-bottom: 0.5rem; border: 1px solid transparent; cursor: pointer; transition: background-color 0.2s; }
-#target-echoes-list li:hover { background: var(--border-color); }
-#result-log { border-top: 1px solid var(--border-color); padding-top: 1rem; }
-p { margin: 0 0 0.5rem 0; opacity: 0.7; }
 
-/* === LA CORRUPCIÓN PROGRESIVA === */
-#corruption-overlay {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 100;
-    transition: all 1s ease-in-out;
-}
+const UI = { /* ... (Sin cambios, pega el de la respuesta anterior) ... */ };
+const AI = { /* ... (Sin cambios, pega el de la respuesta anterior) ... */ };
+const Game = { /* ... (Este sí cambia) ... */ };
 
-/* Nivel 1: Estabilidad < 80% */
-.stability-75 { animation: text-flicker-soft 0.2s infinite; }
-.stability-75 #corruption-overlay { background: radial-gradient(circle, transparent 90%, rgba(0,0,0,0.5) 100%); }
+// --- MÓDULOS UI y AI (son los mismos, no hace falta que los copies de nuevo si no quieres) ---
+Object.assign(UI, {
+    init() { /* ... */ }, showGame() { /* ... */ }, renderPuzzle(puzzle) { /* ... */ }, updateStability(stability) { /* ... */ }, showResult(text) { /* ... */ }
+});
+Object.assign(AI, {
+    async init() { /* ... */ }, async getSimilarity(text1, text2) { /* ... */ }
+});
+// Rellenamos los módulos UI y AI para que el código sea completo
+Object.assign(UI, {
+    init() {
+        this.loader = document.getElementById('loader');
+        this.gameContainer = document.getElementById('game-container');
+        this.stabilityPercent = document.getElementById('stability-percent');
+        this.sourceEchoText = document.getElementById('source-echo-text');
+        this.targetEchoesList = document.getElementById('target-echoes-list');
+        this.resultText = document.getElementById('result-text');
+        this.body = document.body;
+    },
+    showGame() {
+        this.loader.classList.add('hidden');
+        this.gameContainer.classList.remove('hidden');
+    },
+    renderPuzzle(puzzle) {
+        this.sourceEchoText.textContent = puzzle.source;
+        this.targetEchoesList.innerHTML = '';
+        puzzle.targets.forEach((target, index) => {
+            const li = document.createElement('li');
+            li.textContent = `${index + 1}. ${target}`;
+            li.addEventListener('click', () => Game.selectTarget(target));
+            this.targetEchoesList.appendChild(li);
+        });
+    },
+    updateStability(stability) {
+        this.stabilityPercent.textContent = `${stability}%`;
+        this.body.className = '';
+        if (stability < 80) this.body.classList.add('stability-75');
+        if (stability < 50) this.body.classList.add('stability-50');
+        if (stability < 25) this.body.classList.add('stability-25');
+        if (stability <= 0) this.body.classList.add('stability-0');
+    },
+    showResult(text) { this.resultText.textContent = text; }
+});
+Object.assign(AI, {
+    async init() {
+        this.embedder = await pipeline('feature-extraction', './models/all-MiniLM-L6-v2');
+    },
+    async getSimilarity(text1, text2) {
+        if (!this.embedder) return 0;
+        const e1 = await this.embedder(text1, { pooling: 'mean', normalize: true });
+        const e2 = await this.embedder(text2, { pooling: 'mean', normalize: true });
+        const similarity = (cos_sim(e1.data, e2.data) + 1) / 2 * 100;
+        return Math.round(similarity);
+    }
+});
 
-/* Nivel 2: Estabilidad < 50% */
-.stability-50 { filter: blur(0.5px); }
-.stability-50 #corruption-overlay { background: radial-gradient(circle, transparent 70%, rgba(0,0,0,0.8) 100%); }
 
-/* Nivel 3: Estabilidad < 25% */
-.stability-25 #corruption-overlay { background: radial-gradient(circle, transparent 50%, rgba(0,0,0,1) 100%); backdrop-filter: blur(1px); }
-.stability-25 { animation: shake 0.3s infinite; text-shadow: 0 0 5px var(--accent-color), 2px 2px 0px var(--text-color), -2px -2px 0px blue; }
+// --- MÓDULO DE JUEGO (RECONSTRUIDO) ---
+Object.assign(Game, {
+    state: {
+        stability: 100,
+        usedPuzzleIndices: new Set() // Para no repetir puzles
+    },
+    async init() {
+        UI.init();
+        await AI.init();
+        UI.showGame();
+        // --- AÑADIMOS EL LORE AL INICIO ---
+        UI.showResult('Iniciando interfaz del Eco-Sintetizador. Eres un Tejedor de Ecos. Tu misión: restaurar la realidad.');
+        await new Promise(r => setTimeout(r, 3000));
+        this.nextPuzzle();
+    },
+    generatePuzzle() {
+        if (this.state.usedPuzzleIndices.size >= PUZZLE_BANK.length) {
+            return null; // No hay más puzles
+        }
 
-/* Nivel 4: Colapso Total */
-.stability-0 #corruption-overlay { background-color: rgba(0,0,0,1); }
-.stability-0 #game-container { filter: blur(10px); opacity: 0; transition: all 0.5s; }
+        // Elegimos un puzle nuevo al azar
+        let puzzleIndex;
+        do {
+            puzzleIndex = Math.floor(Math.random() * PUZZLE_BANK.length);
+        } while (this.state.usedPuzzleIndices.has(puzzleIndex));
+        
+        this.state.usedPuzzleIndices.add(puzzleIndex);
+        const puzzleData = PUZZLE_BANK[puzzleIndex];
 
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-@keyframes text-flicker-soft { 0%, 100% { text-shadow: 0 0 5px rgba(13, 255, 13, 0.5); } 50% { text-shadow: 0 0 2px rgba(13, 255, 13, 0.3); } }
-@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 50% { transform: translateX(2px); } 75% { transform: translateX(-1px); } }
+        // Creamos las opciones falsas (distractores)
+        const distractors = [...DISTRACTOR_POOL].sort(() => 0.5 - Math.random()).slice(0, 2);
+        const targets = [puzzleData.answer, ...distractors].sort(() => 0.5 - Math.random());
+
+        return {
+            source: puzzleData.source,
+            targets: targets,
+            answer: puzzleData.answer
+        };
+    },
+    nextPuzzle() {
+        this.currentPuzzle = this.generatePuzzle();
+        if (this.currentPuzzle) {
+            UI.renderPuzzle(this.currentPuzzle);
+            UI.showResult('Analiza el Eco Fuente. Encuentra la resonancia semántica en las señales objetivo.');
+        } else {
+            UI.showResult('HAS ESTABILIZADO TODOS LOS ECOS DISPONIBLES. LA REALIDAD TE DA LAS GRACIAS... POR AHORA.');
+            UI.targetEchoesList.innerHTML = '';
+        }
+    },
+    async selectTarget(selectedTarget) {
+        UI.targetEchoesList.innerHTML = '<li>ANALIZANDO RESONANCIA...</li>';
+        const similarity = await AI.getSimilarity(this.currentPuzzle.source, selectedTarget);
+        
+        if (similarity > 70) {
+            UI.showResult(`RESONANCIA: ${similarity}%. Eco Sincronizado. Estabilidad intacta.`);
+        } else {
+            const damage = 25;
+            this.state.stability -= damage;
+            if (this.state.stability < 0) this.state.stability = 0;
+            UI.showResult(`RESONANCIA: ${similarity}%. ¡FALLO DE SINCRONIZACIÓN! Estabilidad comprometida: -${damage}%`);
+            UI.updateStability(this.state.stability);
+        }
+
+        await new Promise(r => setTimeout(r, 2500));
+
+        if (this.state.stability <= 0) {
+            UI.showResult('COLAPSO TOTAL DE LA REALIDAD. SIMULACIÓN TERMINADA.');
+            UI.targetEchoesList.innerHTML = '';
+            UI.sourceEchoText.textContent = '...SEÑAL PERDIDA...';
+            return;
+        }
+        
+        this.nextPuzzle();
+    }
+});
+
+Game.init();
