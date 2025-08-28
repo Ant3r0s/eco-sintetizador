@@ -1,6 +1,6 @@
 import { pipeline, cos_sim } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-// --- BANCO DE PUZLES (Ahora mucho más grande) ---
+// --- BANCO DE PUZLES ---
 const PUZZLE_BANK = [
     { source: 'El sujeto abandonó el arma en el puente al anochecer.', answer: 'El fugitivo se deshizo de la pistola cuando el sol se ponía sobre el viaducto.' },
     { source: 'La transmisión contenía datos encriptados sobre la ubicación del artefacto.', answer: 'El mensaje cifrado revelaba dónde estaba el objeto.' },
@@ -10,26 +10,12 @@ const PUZZLE_BANK = [
     { source: 'Los recuerdos del androide habían sido borrados.', answer: 'La memoria del sintético fue eliminada.' },
     { source: 'La criatura emergió de las profundidades abisales.', answer: 'El monstruo salió del fondo del océano.' }
 ];
-
 const DISTRACTOR_POOL = [
     'Los gatos comen pescado.', 'El cielo es generalmente azul.', 'La gravedad tira de las cosas hacia abajo.', 'El agua está compuesta de H2O.',
     'La semana tiene siete días.', 'El sol es una estrella.', 'Los árboles necesitan luz para crecer.', 'Los ordenadores funcionan con electricidad.'
 ];
 
-
-const UI = { /* ... (Sin cambios, pega el de la respuesta anterior) ... */ };
-const AI = { /* ... (Sin cambios, pega el de la respuesta anterior) ... */ };
-const Game = { /* ... (Este sí cambia) ... */ };
-
-// --- MÓDULOS UI y AI (son los mismos, no hace falta que los copies de nuevo si no quieres) ---
-Object.assign(UI, {
-    init() { /* ... */ }, showGame() { /* ... */ }, renderPuzzle(puzzle) { /* ... */ }, updateStability(stability) { /* ... */ }, showResult(text) { /* ... */ }
-});
-Object.assign(AI, {
-    async init() { /* ... */ }, async getSimilarity(text1, text2) { /* ... */ }
-});
-// Rellenamos los módulos UI y AI para que el código sea completo
-Object.assign(UI, {
+const UI = {
     init() {
         this.loader = document.getElementById('loader');
         this.gameContainer = document.getElementById('game-container');
@@ -62,10 +48,21 @@ Object.assign(UI, {
         if (stability <= 0) this.body.classList.add('stability-0');
     },
     showResult(text) { this.resultText.textContent = text; }
-});
-Object.assign(AI, {
+};
+
+const AI = {
     async init() {
-        this.embedder = await pipeline('feature-extraction', './models/all-MiniLM-L6-v2');
+        // =================================================================
+        // ======================= EL PUTO ARREGLO FINAL ===================
+        // =================================================================
+        // Dejamos de usar rutas relativas de mierda.
+        // Construimos la URL completa y absoluta a nuestra carpeta de modelos.
+        const modelPath = `${window.location.href.substring(0, window.location.href.lastIndexOf('/'))}/models/all-MiniLM-L6-v2`;
+        
+        // Y le pasamos esa URL. Ahora no tiene cojones a perderse.
+        this.embedder = await pipeline('feature-extraction', modelPath);
+        // =================================================================
+        // =================================================================
     },
     async getSimilarity(text1, text2) {
         if (!this.embedder) return 0;
@@ -74,30 +71,30 @@ Object.assign(AI, {
         const similarity = (cos_sim(e1.data, e2.data) + 1) / 2 * 100;
         return Math.round(similarity);
     }
-});
+};
 
-
-// --- MÓDULO DE JUEGO (RECONSTRUIDO) ---
-Object.assign(Game, {
+const Game = {
     state: {
         stability: 100,
-        usedPuzzleIndices: new Set() // Para no repetir puzles
+        usedPuzzleIndices: new Set()
     },
     async init() {
         UI.init();
-        await AI.init();
-        UI.showGame();
-        // --- AÑADIMOS EL LORE AL INICIO ---
-        UI.showResult('Iniciando interfaz del Eco-Sintetizador. Eres un Tejedor de Ecos. Tu misión: restaurar la realidad.');
-        await new Promise(r => setTimeout(r, 3000));
-        this.nextPuzzle();
+        try {
+            await AI.init();
+            UI.showGame();
+            UI.showResult('Iniciando interfaz del Eco-Sintetizador. Eres un Tejedor de Ecos. Tu misión: restaurar la realidad.');
+            await new Promise(r => setTimeout(r, 3000));
+            this.nextPuzzle();
+        } catch (error) {
+            console.error("FALLO CRÍTICO AL INICIAR LA IA:", error);
+            UI.loader.textContent = "ERROR: EL NÚCLEO SEMÁNTICO NO RESPONDE. RECARGA LA SIMULACIÓN.";
+        }
     },
     generatePuzzle() {
         if (this.state.usedPuzzleIndices.size >= PUZZLE_BANK.length) {
-            return null; // No hay más puzles
+            return null;
         }
-
-        // Elegimos un puzle nuevo al azar
         let puzzleIndex;
         do {
             puzzleIndex = Math.floor(Math.random() * PUZZLE_BANK.length);
@@ -105,8 +102,6 @@ Object.assign(Game, {
         
         this.state.usedPuzzleIndices.add(puzzleIndex);
         const puzzleData = PUZZLE_BANK[puzzleIndex];
-
-        // Creamos las opciones falsas (distractores)
         const distractors = [...DISTRACTOR_POOL].sort(() => 0.5 - Math.random()).slice(0, 2);
         const targets = [puzzleData.answer, ...distractors].sort(() => 0.5 - Math.random());
 
@@ -139,18 +134,15 @@ Object.assign(Game, {
             UI.showResult(`RESONANCIA: ${similarity}%. ¡FALLO DE SINCRONIZACIÓN! Estabilidad comprometida: -${damage}%`);
             UI.updateStability(this.state.stability);
         }
-
         await new Promise(r => setTimeout(r, 2500));
-
         if (this.state.stability <= 0) {
             UI.showResult('COLAPSO TOTAL DE LA REALIDAD. SIMULACIÓN TERMINADA.');
             UI.targetEchoesList.innerHTML = '';
             UI.sourceEchoText.textContent = '...SEÑAL PERDIDA...';
             return;
         }
-        
         this.nextPuzzle();
     }
-});
+};
 
 Game.init();
